@@ -21,6 +21,16 @@ export class GameComponent implements AfterViewInit {
   private score = 0;
   private highScore = 0;
 
+  private bgSkyX = 0;
+  private bgGroundX = 0;
+
+  private bgSkySpeed = 0.2;
+  private bgGroundSpeed = 1;
+
+  private obstacleSpawnTimer = 0;
+  private spawnCooldown = 90; // frames between spawns (~1.5s at 60fps)
+  private maxObstacles = 3;
+
   private player = {
     x: 50,
     y: 600,
@@ -50,6 +60,14 @@ export class GameComponent implements AfterViewInit {
       }
     });
     this.highScore = Number(localStorage.getItem('highScore')) || 0;
+    this.player = {
+      x: 50,
+      y: this.height - 80,
+      width: 28,
+      height: 40,
+      vy: 0,
+      jumping: false,
+    };
   }
 
   private handleInput(e: KeyboardEvent) {
@@ -72,14 +90,19 @@ export class GameComponent implements AfterViewInit {
       this.player.jumping = false;
     }
 
+    // Move obstacles
     this.obstacles.forEach((ob) => (ob.x -= this.currentSpeed));
-    if (Math.random() < 0.02) {
-      this.obstacles.push({
-        x: this.width,
-        y: this.height - 30,
-        width: 30,
-        height: 30,
-      });
+
+    // Spawn new obstacles
+    this.obstacleSpawnTimer++;
+    const canSpawn =
+      this.obstacleSpawnTimer >= this.spawnCooldown &&
+      this.obstacles.length < this.maxObstacles;
+
+    if (canSpawn) {
+      this.spawnObstacle();
+      this.obstacleSpawnTimer = 0;
+      this.spawnCooldown = Math.max(40, this.spawnCooldown - 0.2);
     }
 
     this.obstacles = this.obstacles.filter((ob) => ob.x + ob.width > 0);
@@ -90,23 +113,72 @@ export class GameComponent implements AfterViewInit {
       }
     }
     this.score += this.currentSpeed * 0.1;
+
+    this.bgSkyX -= this.bgSkySpeed;
+    this.bgGroundX -= this.bgGroundSpeed;
+
+    if (this.bgSkyX <= -this.width) this.bgSkyX = 0;
+    if (this.bgGroundX <= -this.width) this.bgGroundX = 0;
+  }
+
+  private spawnObstacle() {
+    const width = 24 + Math.random() * 16;
+    const height = 40;
+    this.obstacles.push({
+      x: this.width,
+      y: this.height - height,
+      width,
+      height,
+    });
   }
 
   private draw() {
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    // Draw Player (Jumper)
-    const { x, y, width, height } = this.player;
-    const gradient = this.ctx.createLinearGradient(x, y, x + width, y + height);
-    gradient.addColorStop(0, '#22d3ee'); // cyan
-    gradient.addColorStop(1, '#0ea5e9'); // blue
-    this.ctx.fillStyle = gradient;
-    this.roundRect(x, y, width, height, 10);
+    // Sky Layer
+    this.ctx.fillStyle = '#38bdf8'; // light blue
+    this.ctx.fillRect(0, 0, this.width, this.height);
 
-    // Draw Obstacles
+    this.ctx.fillStyle = '#bae6fd'; // lighter cloud layer
+    this.ctx.fillRect(this.bgSkyX, 0, this.width, this.height / 2);
+    this.ctx.fillRect(this.bgSkyX + this.width, 0, this.width, this.height / 2);
+
+    // Ground Layer
+    this.ctx.fillStyle = '#166534'; // green hills
+    this.ctx.fillRect(this.bgGroundX, this.height - 60, this.width, 60);
+    this.ctx.fillRect(
+      this.bgGroundX + this.width,
+      this.height - 60,
+      this.width,
+      60
+    );
+
+    /// Player (Jumper)
+    const { x, y, width, height } = this.player;
+    this.ctx.save();
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 8;
+
+    const gradient = this.ctx.createLinearGradient(x, y, x + width, y + height);
+    gradient.addColorStop(0, '#0ea5e9'); // blue-500
+    gradient.addColorStop(1, '#0284c7'); // blue-600
+
+    this.ctx.fillStyle = gradient;
+    this.roundRect(x, y, width, height, 12);
+    this.ctx.restore();
+
+    // Obstacles
     for (const ob of this.obstacles) {
-      this.ctx.fillStyle = '#7f1d1d'; // rich red
-      this.roundRect(ob.x, ob.y, ob.width, ob.height, 6);
+      const obGradient = this.ctx.createLinearGradient(
+        ob.x,
+        ob.y,
+        ob.x,
+        ob.y + ob.height
+      );
+      obGradient.addColorStop(0, '#1e293b'); // slate-800
+      obGradient.addColorStop(1, '#0f172a'); // slate-900
+      this.ctx.fillStyle = obGradient;
+      this.roundRect(ob.x, ob.y, ob.width, ob.height, 8);
     }
   }
 
@@ -188,6 +260,8 @@ export class GameComponent implements AfterViewInit {
     this.obstacles = [];
     this.currentSpeed = this.baseSpeed;
     this.score = 0;
+    this.bgSkyX = 0;
+    this.bgGroundX = 0;
     this.loop();
   }
 }
