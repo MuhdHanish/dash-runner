@@ -37,11 +37,17 @@ export class GameComponent implements AfterViewInit {
     width: 40,
     height: 40,
     vy: 0,
-    jumping: false,
+    jumpCount: 0,
   };
   private gravity = 1;
-  private obstacles: { x: number; y: number; width: number; height: number }[] =
-    [];
+  private obstacles: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    vy?: number;
+    type: 'small' | 'tall' | 'double' | 'moving';
+  }[] = [];
 
   ngAfterViewInit() {
     const canvas = this.canvasRef.nativeElement;
@@ -54,9 +60,8 @@ export class GameComponent implements AfterViewInit {
     canvas.addEventListener('click', () => {
       if (this.gameOver) {
         this.resetGame();
-      } else if (!this.player.jumping) {
-        this.player.vy = -20;
-        this.player.jumping = true;
+      } else {
+        this.tryJump();
       }
     });
     this.highScore = Number(localStorage.getItem('highScore')) || 0;
@@ -66,16 +71,26 @@ export class GameComponent implements AfterViewInit {
       width: 28,
       height: 40,
       vy: 0,
-      jumping: false,
+      jumpCount: 0,
     };
   }
 
   private handleInput(e: KeyboardEvent) {
-    if ((e.code === 'Space' || e.code === 'ArrowUp') && !this.player.jumping) {
-      this.player.vy = -20;
-      this.player.jumping = true;
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      this.tryJump();
     }
   }
+
+  private tryJump() {
+    if (this.player.jumpCount < 2) {
+      this.player.vy = -20;
+      this.player.jumpCount++;
+    }
+  }
+
+  private lastObstacleX = 0;
+  private minDistance = 150;
+  private maxDistance = 350;
 
   private update() {
     this.currentSpeed = Math.min(
@@ -87,25 +102,54 @@ export class GameComponent implements AfterViewInit {
 
     if (this.player.y >= this.height - this.player.height) {
       this.player.y = this.height - this.player.height;
-      this.player.jumping = false;
+      this.player.vy = 0;
+      this.player.jumpCount = 0;
     }
 
     // Move obstacles
-    this.obstacles.forEach((ob) => (ob.x -= this.currentSpeed));
+    this.obstacles.forEach((ob) => {
+      ob.x -= this.currentSpeed;
 
-    // Spawn new obstacles
-    this.obstacleSpawnTimer++;
+      if (ob.type === 'moving' && typeof ob.vy === 'number') {
+        ob.y += ob.vy;
+        if (ob.y <= this.height - 100 || ob.y >= this.height - ob.height) {
+          ob.vy *= -1; // bounce back
+        }
+      }
+    });
+    this.obstacles = this.obstacles.filter((ob) => ob.x + ob.width > 0);
+
+    // // Spawn new obstacles
+    // this.obstacleSpawnTimer++;
+    // const canSpawn =
+    //   this.obstacleSpawnTimer >= this.spawnCooldown &&
+    //   this.obstacles.length < this.maxObstacles;
+
+    // if (canSpawn) {
+    //   this.spawnObstacle();
+    //   this.obstacleSpawnTimer = 0;
+    //   this.spawnCooldown = Math.max(40, this.spawnCooldown - 0.2);
+    // }
+
+    // ✨ Distance-based obstacle spawning
+    const lastObstacle = this.obstacles[this.obstacles.length - 1];
+    const lastX = lastObstacle ? lastObstacle.x + lastObstacle.width : 0;
+    const distanceSinceLast = this.width - lastX;
+
+    // Scale difficulty (lower spacing as score increases)
+    this.minDistance = Math.max(100, 200 - this.score * 0.2);
+    this.maxDistance = Math.max(200, 350 - this.score * 0.3);
+    const spacingThreshold =
+      Math.random() * (this.maxDistance - this.minDistance) + this.minDistance;
+
     const canSpawn =
-      this.obstacleSpawnTimer >= this.spawnCooldown &&
+      distanceSinceLast >= spacingThreshold &&
       this.obstacles.length < this.maxObstacles;
 
     if (canSpawn) {
       this.spawnObstacle();
-      this.obstacleSpawnTimer = 0;
-      this.spawnCooldown = Math.max(40, this.spawnCooldown - 0.2);
     }
 
-    this.obstacles = this.obstacles.filter((ob) => ob.x + ob.width > 0);
     for (const ob of this.obstacles) {
       if (this.isColliding(this.player, ob)) {
         this.gameOver = true;
@@ -121,15 +165,79 @@ export class GameComponent implements AfterViewInit {
     if (this.bgGroundX <= -this.width) this.bgGroundX = 0;
   }
 
+  private obstacleTypes = ['small', 'tall', 'double', 'moving'];
   private spawnObstacle() {
-    const width = 24 + Math.random() * 16;
-    const height = 40;
-    this.obstacles.push({
-      x: this.width,
-      y: this.height - height,
-      width,
-      height,
-    });
+    const type = this.chooseObstacleType();
+    const baseY = this.height;
+
+    switch (type) {
+      case 'small':
+        this.obstacles.push({
+          x: this.width,
+          y: baseY - 30,
+          width: 30,
+          height: 30,
+          type,
+        });
+        break;
+
+      case 'tall':
+        this.obstacles.push({
+          x: this.width,
+          y: baseY - 60,
+          width: 24,
+          height: 60,
+          type,
+        });
+        break;
+
+      case 'double':
+        const gap = 50;
+        const width = 20;
+        const height = 30;
+        this.obstacles.push(
+          {
+            x: this.width,
+            y: baseY - height,
+            width,
+            height,
+            type,
+          },
+          {
+            x: this.width + width + gap,
+            y: baseY - height,
+            width,
+            height,
+            type,
+          }
+        );
+        break;
+
+      case 'moving':
+        const moveHeight = 40;
+        this.obstacles.push({
+          x: this.width,
+          y: baseY - moveHeight,
+          width: 28,
+          height: moveHeight,
+          vy: 1.2,
+          type,
+        });
+        break;
+    }
+  }
+
+  private chooseObstacleType(): string {
+    const scoreBasedDifficulty = Math.floor(this.score / 100);
+    if (scoreBasedDifficulty < 3) {
+      return 'small';
+    } else if (scoreBasedDifficulty < 6) {
+      return ['small', 'tall'][Math.floor(Math.random() * 2)];
+    } else {
+      return this.obstacleTypes[
+        Math.floor(Math.random() * this.obstacleTypes.length)
+      ];
+    }
   }
 
   private draw() {
@@ -256,7 +364,7 @@ export class GameComponent implements AfterViewInit {
     this.gameOver = false;
     this.player.y = this.height - this.player.height;
     this.player.vy = 0;
-    this.player.jumping = false;
+    this.player.jumpCount = 0;
     this.obstacles = [];
     this.currentSpeed = this.baseSpeed;
     this.score = 0;
